@@ -1,0 +1,160 @@
+{
+  "Note": "Tool catalog for the Remote Diagnostics window (gui\\Gui.Core.psm1). Data only. Script = the base name the Run-*.bat launcher auto-detects (newest Name.v*.ps1, else Name.ps1). Inputs become arguments exactly as the launcher would pass them; Stdin inputs are never on a command line. Prompts and Results name the exact text the script prints (Source) - tests\\gui\\Test-GuiPromptContract.ps1 fails when a script no longer contains it. AllowedReadHost lists every Read-Host the GUI never reaches, with the reason. Prompt Kind: YesNo (a dialog, X sends Default), Text (a dialog with a text box, X sends an empty line), FromInput (sends the value of the named input, no dialog), Secret (sends the named Password input, never logged). Tool flags: Kind ChangesPC = the window asks for confirmation (Confirm text) before it runs; NoOutputFiles = the tool writes no output location, so a clean exit says Finished.",
+  "Tools": [
+    {
+      "Id": "PullLocal", "Title": "Pull logs from THIS PC", "Script": "pull-local-logs", "Launcher": "Run-PullLocalLogs.bat",
+      "Summary": "Event logs, BSOD and crash dumps, GPU, print, network, startup and ESP checks from this PC, zipped into one file.",
+      "Kind": "ReadOnly", "Enabled": true,
+      "Inputs": [
+        { "Id": "Hours", "Type": "Int", "Label": "Hours to look back (1-168)", "Default": 72, "Min": 1, "Max": 168, "Arg": "-Hours" },
+        { "Id": "FullDump", "Type": "Bool", "Label": "Include the full memory dump (MEMORY.DMP)", "Default": false, "Arg": "-IncludeFullDump", "ArgWhenFalse": "-NoFullDump", "Info": "MemoryDump" },
+        { "Id": "OutRoot", "Type": "Folder", "Label": "Output folder (empty = the logged-in user's Desktop\\RemoteDiagLogs)", "Default": "", "Arg": "-OutRoot" }
+      ],
+      "Results": [
+        { "Kind": "Folder", "Source": " Saved to: ", "Pattern": "^ Saved to: (?<v>.+)$" },
+        { "Kind": "Zip", "Source": " >>> COPY THIS FILE OFF THE MACHINE: ", "Pattern": "^ >>> COPY THIS FILE OFF THE MACHINE: (?<v>.+)$" },
+        { "Kind": "Log", "Source": "Full run log saved to: ", "Pattern": "^Full run log saved to: (?<v>.+)$" }
+      ],
+      "Failure": { "Source": " ERROR - something went wrong:", "Pattern": "^ ERROR - something went wrong:" },
+      "WarningText": "The pull finished, but a step failed, so the output is incomplete (the script exits normally after a failed step).",
+      "Warnings": [
+        { "Source": "Checking log availability...", "Pattern": "^  Checking log availability\\.\\.\\. FAILED$" },
+        { "Source": "Pulling events (last $Hours hours)...", "Pattern": "^  Pulling events \\(last \\d+ hours\\)\\.\\.\\. FAILED$" }
+      ],
+      "ReviewFiles": [ "StartupAndTasks.txt", "PrintQueues.txt", "EspUsage.txt" ],
+      "Prompts": [],
+      "AllowedReadHost": [
+        { "Contains": "[scriptblock]$Ask = { param($p) Read-Host $p }", "Why": "hours prompt: the GUI always passes -Hours" },
+        { "Contains": "Include the full memory dump too?", "Why": "the GUI always passes -IncludeFullDump or -NoFullDump" },
+        { "Contains": "if (-not [Console]::IsInputRedirected) { Read-Host | Out-Null }", "Why": "press-Enter-to-close is skipped under redirected stdin" }
+      ]
+    },
+    {
+      "Id": "PullRemote", "Title": "Pull logs from ANOTHER PC", "Script": "pull-remote-logs", "Launcher": "Run-PullRemoteLogs.bat",
+      "Summary": "The same pull, over WinRM, from a PC where 'Enable remote diagnostics' was run. Needs a local admin account on that PC.",
+      "Kind": "ReadOnly", "Enabled": true,
+      "Notice": "The other PC must have run 'Enable remote diagnostics' (it turns itself off after 48 hours). The password is sent to the script over its input only: it is never put on a command line, stored in a file or shown in the console, and the box is cleared when it is sent.",
+      "Inputs": [
+        { "Id": "ComputerName", "Type": "Text", "Label": "Computer name or IP", "Default": "", "Required": true, "Arg": "-ComputerName" },
+        { "Id": "Username", "Type": "Text", "Label": "Local admin account on that PC (e.g. .\\Admin or PC\\Admin)", "Default": "", "Required": true, "Stdin": true },
+        { "Id": "Password", "Type": "Password", "Label": "Password of that account (leave it blank if the account has no password and 'Enable remote diagnostics' was run there)", "Stdin": true },
+        { "Id": "Hours", "Type": "Int", "Label": "Hours to look back (1-168)", "Default": 72, "Min": 1, "Max": 168, "Arg": "-Hours" },
+        { "Id": "FullDump", "Type": "Bool", "Label": "Include the full memory dump (MEMORY.DMP) from that PC (can be several GB over the network)", "Default": false, "Arg": "-IncludeFullDump", "ArgWhenFalse": "-NoFullDump" },
+        { "Id": "OutRoot", "Type": "Folder", "Label": "Output folder (empty = Public Desktop\\RemoteDiagLogs on THIS PC)", "Default": "", "Arg": "-OutRoot" }
+      ],
+      "Results": [
+        { "Kind": "Folder", "Source": " Saved to: ", "Pattern": "^ Saved to: (?<v>.+)$" },
+        { "Kind": "Zip", "Source": " Zipped copy (handy for forwarding/attaching): ", "Pattern": "^ Zipped copy \\(handy for forwarding/attaching\\): (?<v>.+)$" },
+        { "Kind": "Log", "Source": "Full run log saved to: ", "Pattern": "^Full run log saved to: (?<v>.+)$" }
+      ],
+      "Failure": { "Source": " ERROR - something went wrong:", "Pattern": "^ ERROR - something went wrong:" },
+      "WarningText": "The pull finished, but a step failed, so the output is incomplete. A wrong user name or password, or remote diagnostics not enabled on that PC, fails every log like this (the script exits normally after a failed step).",
+      "Warnings": [
+        { "Source": "Checking log availability on target...", "Pattern": "^  Checking log availability on target\\.\\.\\. FAILED$" },
+        { "Source": "Pulling events (last $Hours hours)...", "Pattern": "^  Pulling events \\(last \\d+ hours\\)\\.\\.\\. FAILED$" },
+        { "Source": "Establishing session for file transfer...", "Pattern": "^  Establishing session for file transfer\\.\\.\\. FAILED$" }
+      ],
+      "ReviewFiles": [ "StartupAndTasks.txt", "PrintQueues.txt", "EspUsage.txt" ],
+      "Prompts": [
+        { "Id": "Username", "Kind": "FromInput", "Input": "Username", "Source": "Username: ", "Regex": "^Username:$" },
+        { "Id": "Password", "Kind": "Secret", "Input": "Password", "Source": "Password: ", "Regex": "^Password:$" }
+      ],
+      "AllowedReadHost": [
+        { "Contains": "[scriptblock]$Ask = { param($p) Read-Host $p }", "Why": "hours prompt: the GUI always passes -Hours" },
+        { "Contains": "$ComputerName = Read-Host \"Target computer name", "Why": "the GUI always passes -ComputerName (it is a required input)" },
+        { "Contains": "Include the full memory dump too?", "Why": "the GUI always passes -IncludeFullDump or -NoFullDump" },
+        { "Contains": "-AsSecureString", "Why": "interactive runs only: under redirected stdin the script reads the password with [Console]::In.ReadLine() instead (Read-Host -AsSecureString hangs there, spike S2)" },
+        { "Contains": "if (-not [Console]::IsInputRedirected) { Read-Host | Out-Null }", "Why": "press-Enter-to-close is skipped under redirected stdin" }
+      ]
+    },
+    {
+      "Id": "EnableRemote", "Title": "Enable remote diagnostics on THIS PC", "Script": "enable-remote-diag", "Launcher": "Run-EnableRemoteDiag.bat",
+      "Summary": "Opens WinRM and remote event-log access so another PC can pull logs. Turns itself off again after 48 hours.",
+      "Kind": "ChangesPC", "Enabled": true,
+      "Notice": "Opens WinRM, remote event-log access and the remote registry on THIS PC, and relaxes the blank-password network-logon rule (LimitBlankPasswordUse). It is reverted automatically after 48 hours by a scheduled task; use 'Revert remote diagnostics now' to close it earlier.",
+      "Confirm": "This opens WinRM, remote event-log access and the remote registry on this PC and relaxes the blank-password network-logon rule, so another PC can pull logs from it. It closes itself again after 48 hours (or earlier with 'Revert remote diagnostics now'). Run it?",
+      "Inputs": [],
+      "Results": [ { "Kind": "Log", "Source": "Full log saved to: ", "Pattern": "^Full log saved to: (?<v>.+)$" } ],
+      "Failure": { "Source": " ERROR - something went wrong:", "Pattern": "^ ERROR - something went wrong:" },
+      "ReviewFiles": [], "Prompts": [],
+      "AllowedReadHost": [ { "Contains": "if (-not [Console]::IsInputRedirected) { Read-Host | Out-Null }", "Why": "press-Enter-to-close is skipped under redirected stdin" } ]
+    },
+    {
+      "Id": "RevertRemote", "Title": "Revert remote diagnostics now", "Script": "revert-remote-diag", "Launcher": "",
+      "Summary": "Closes what 'Enable remote diagnostics' opened, before the 48-hour automatic revert.",
+      "Kind": "ChangesPC", "Enabled": true, "NoOutputFiles": true,
+      "Confirm": "This closes WinRM, remote event-log access and the remote registry on this PC, restores the blank-password network-logon rule and cancels the automatic revert task. Run it?",
+      "Inputs": [], "Results": [], "ReviewFiles": [], "Prompts": [], "AllowedReadHost": []
+    },
+    {
+      "Id": "Persistence", "Title": "Deep persistence inventory", "Script": "pull-persistence", "Launcher": "Run-PullPersistence.bat",
+      "Summary": "Everything that can start a script by itself, with hashes and copies of suspicious scripts. Slow, and the output is sensitive.",
+      "Kind": "ReadOnly", "Enabled": true, "Notice": "Slow (several minutes). The output holds PowerShell history and script copies: treat it as sensitive and do not leave it on a client's Desktop.",
+      "Inputs": [
+        { "Id": "OutRoot", "Type": "Folder", "Label": "Output folder (empty = this account's Desktop)", "Default": "", "Arg": "-OutRoot" },
+        { "Id": "NoSamples", "Type": "Bool", "Label": "Do not copy suspicious script files (samples)", "Default": false, "Arg": "-NoSamples" },
+        { "Id": "LogonDays", "Type": "Int", "Label": "Days of logon / RDP events (1-365)", "Default": 14, "Min": 1, "Max": 365, "Arg": "-LogonDays", "OmitWhenDefault": true }
+      ],
+      "Results": [ { "Kind": "Folder", "Source": "Log \"Output folder: $out\"", "Pattern": "^Output folder: (?<v>.+)$" } ],
+      "ReviewFiles": [], "Prompts": [], "AllowedReadHost": []
+    },
+    {
+      "Id": "Esp", "Title": "EFI partition usage", "Script": "Check-EspUsage", "Launcher": "Run-CheckEspUsage.bat",
+      "Summary": "Who filled the EFI System Partition: Windows, HP or firmware capsules. Mounts it read-only and unmounts it after.",
+      "Kind": "ReadOnly", "Enabled": true, "Inputs": [],
+      "Results": [
+        { "Kind": "File", "Source": "W (\"Report: {0}\" -f $reportPath)", "Pattern": "^Report: (?<v>.+)$" },
+        { "Kind": "File", "Source": "W (\"CSV   : {0}\" -f $csvPath)", "Pattern": "^CSV   : (?<v>.+)$" }
+      ],
+      "Failure": { "Source": "(\"ERROR: {0}\" -f $_.Exception.Message)", "Pattern": "^ERROR: " },
+      "ReviewFiles": [], "Prompts": [], "AllowedReadHost": []
+    },
+    {
+      "Id": "Camera", "Title": "Camera and startup check", "Script": "Check-CameraAndStartup", "Launcher": "Run-CheckCameraAndStartup.bat",
+      "Summary": "Report only: camera devices, drivers, privacy settings, USB power and startup items. Changes nothing.",
+      "Kind": "ReadOnly", "Enabled": true, "Notice": "Report only (the launcher's R). The camera fixes (F) and DISM/sfc repair (A) change the PC and ask y/N per fix: use Run-CheckCameraAndStartup.bat for those.",
+      "Inputs": [],
+      "Results": [ { "Kind": "File", "Source": "W \"Saved: $out\"", "Pattern": "^Saved: (?<v>.+)$" } ],
+      "ReviewFiles": [], "Prompts": [],
+      "AllowedReadHost": [ { "Contains": "$a = Read-Host \"$q [y/N]\"", "Why": "fix questions: only asked with -Fix, which the GUI never passes" } ]
+    },
+    {
+      "Id": "PrintWatch", "Title": "Watch a print freeze", "Script": "Watch-PrintFreeze", "Launcher": "Run-WatchPrintFreeze.bat",
+      "Summary": "Start it, then print the job that freezes. Logs every change in the spooler, the app and the queues; saves events and crash reports when stopped.",
+      "Kind": "ReadOnly", "Enabled": true, "LongRunning": true, "StopFile": true,
+      "Notice": "Runs until the time is up or you press 'Stop and save'. Read-only apart from switching on the PrintService Operational log.",
+      "Inputs": [
+        { "Id": "Minutes", "Type": "Int", "Label": "Minutes to watch (1-1440)", "Default": 120, "Min": 1, "Max": 1440, "Arg": "-Minutes", "OmitWhenDefault": true },
+        { "Id": "AppName", "Type": "Text", "Label": "Program that freezes (process name)", "Default": "Chek", "Arg": "-AppName", "OmitWhenDefault": true }
+      ],
+      "Results": [ { "Kind": "Folder", "Source": "Write-Log ('Done. Send the whole folder: {0}' -f $outDir)", "Pattern": "Done\\. Send the whole folder: (?<v>.+)$" } ],
+      "ReviewFiles": [], "Prompts": [], "AllowedReadHost": []
+    },
+    {
+      "Id": "SwitchPrinter", "Title": "Switch printer WSD -> TCP/IP", "Script": "Switch-PrinterToTcpIp", "Launcher": "Run-SwitchPrinterToTcpIp.bat",
+      "Summary": "Moves one print queue from a WSD port to a Standard TCP/IP port at the printer's IP, restarts the spooler and clears stuck jobs.",
+      "Kind": "ChangesPC", "Enabled": true,
+      "Notice": "Changes this PC's print setup: the queue gets a new port, the spooler restarts and stuck jobs are cleared. Tick 'Dry run' first to see what it would do without changing anything. Note the change for the client.",
+      "Confirm": "This switches the chosen print queue to a TCP/IP port on this PC, restarts the print spooler and clears stuck print jobs (nothing is changed when 'Dry run' is ticked). Run it?",
+      "Inputs": [
+        { "Id": "QueueName", "Type": "Printer", "Label": "Print queue on this PC (pick one or type its exact name)", "Default": "", "Required": true, "Arg": "-QueueName" },
+        { "Id": "IpAddress", "Type": "Text", "Label": "Printer IP address (from its screen or a printed network page)", "Default": "", "Required": true, "Arg": "-IpAddress", "Pattern": "^\\d{1,3}(\\.\\d{1,3}){3}$", "PatternText": "type four numbers separated by dots, for example 192.168.0.50." },
+        { "Id": "NewName", "Type": "Text", "Label": "New queue name (optional; empty = keep the same queue)", "Default": "", "Arg": "-NewName" },
+        { "Id": "RemoveStale", "Type": "Bool", "Label": "Also remove the old WSD port and duplicate queues if they are unused (it asks first)", "Default": false, "Arg": "-RemoveStale" },
+        { "Id": "TestPage", "Type": "Bool", "Label": "Print a test page afterwards", "Default": false, "Arg": "-TestPage" },
+        { "Id": "DryRun", "Type": "Bool", "Label": "Dry run: show what would happen, change nothing", "Default": false, "Arg": "-DryRun" }
+      ],
+      "Results": [ { "Kind": "File", "Source": "Write-Log ('Log: {0}' -f $logFile)", "Pattern": "^Log: (?<v>.+)$" } ],
+      "Cancel": { "Source": "Cancelled - nothing changed.", "Pattern": "^Cancelled - nothing changed\\.$" },
+      "ReviewFiles": [],
+      "Prompts": [
+        { "Id": "IpAddress", "Kind": "Text", "Source": "Printer IP address (from its screen or a printed network page): ", "Regex": "^Printer IP address .*:$", "Title": "Printer IP address", "Message": "The tool asks for the printer's IP address (from its screen or a printed network page). Closing this box sends an empty line and the tool stops." },
+        { "Id": "PortAnyway", "Kind": "YesNo", "Source": "Switch the queue to this port anyway? (y/N): ", "Regex": "^Switch the queue to this port anyway\\? \\(y/N\\):$", "Accept": "y", "Default": "n", "Title": "The printer does not answer", "Message": "The printer does not answer on TCP 9100 (raw printing): wrong IP, printer off, or raw printing disabled. Switch the queue to this port anyway?", "AcceptText": "Switch anyway", "RefuseText": "Cancel (change nothing)" },
+        { "Id": "RemoveOldQueue", "Kind": "YesNo", "Source": "Remove the old queue \"{0}\" now? (y/N): ", "Regex": "^Remove the old queue \".+\" now\\? \\(y/N\\):$", "Accept": "y", "Default": "n", "Title": "Remove the old queue?", "Message": "The new queue is in place. Remove the old queue now?", "AcceptText": "Remove it", "RefuseText": "Keep it" },
+        { "Id": "RemoveQueue", "Kind": "YesNo", "Source": "Remove queue \"{0}\"? (y/N): ", "Regex": "^Remove queue \".+\"\\? \\(y/N\\):$", "Accept": "y", "Default": "n", "Title": "Remove this queue?", "Message": "This queue looks like an unused duplicate. Remove it?", "AcceptText": "Remove it", "RefuseText": "Keep it" },
+        { "Id": "RemovePorts", "Kind": "YesNo", "Source": "Remove these unused WSD ports? (y/N): ", "Regex": "^Remove these unused WSD ports\\? \\(y/N\\):$", "Accept": "y", "Default": "n", "Title": "Remove the unused WSD ports?", "Message": "The ports listed in the console are no longer used by any queue. Remove them?", "AcceptText": "Remove them", "RefuseText": "Keep them" }
+      ],
+      "AllowedReadHost": [ { "Contains": "(Read-Host).Trim()", "Why": "every use is the answer to one of the prompts above (the IP prompt is never reached: -IpAddress is required)" } ]
+    }
+  ]
+}
